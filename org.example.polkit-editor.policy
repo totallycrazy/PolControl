@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- VERSION: 1.1 -->
+<!DOCTYPE policyconfig PUBLIC 
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0 ://EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <action id="org.example.polkit-editor.write">
+    <description>Save custom Polkit rules</description>
+    <message>Authentication is required to modify system-level security policies.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/polkit-editor-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+</policyconfig>
