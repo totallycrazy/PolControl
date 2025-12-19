@@ -3,6 +3,7 @@ import re
 import glob
 import logging
 import xml.etree.ElementTree as ET
+from collections import defaultdict
 
 logger = logging.getLogger("PolkitPro.Logic")
 
@@ -141,18 +142,28 @@ class PolkitSystem:
                 self.rule_files.append(PolkitRuleFile(path))
 
     def _map_rules_to_actions(self):
+        rule_targets = defaultdict(list)
+        rule_externals = defaultdict(lambda: {"groups": {}, "users": {}})
+
+        for rf in self.rule_files:
+            content = rf.content or ""
+            matches = re.findall(r'action\.id\s*==\s*"([^"]+)"', content)
+            if not matches:
+                matches = [aid for aid in self.actions.keys() if aid in content]
+
+            for aid in matches:
+                rule_targets[aid].append(rf)
+                if "90-custom-ui" in rf.filename:
+                    continue
+                for g in re.findall(r'isInGroup\("([^"]+)"\)', content):
+                    rule_externals[aid]["groups"][g] = rf.filename
+                for u in re.findall(r'subject\.user\s*==\s*"([^"]+)"', content):
+                    rule_externals[aid]["users"][u] = rf.filename
+
         for aid, action in self.actions.items():
-            action.matching_rules = []
-            action.external_groups = {}
-            action.external_users = {}
-            for rf in self.rule_files:
-                if aid in rf.content:
-                    action.matching_rules.append(rf)
-                    if "90-custom-ui" not in rf.filename:
-                        gs = re.findall(r'isInGroup\("([^"]+)"\)', rf.content)
-                        for g in gs: action.external_groups[g] = rf.filename
-                        us = re.findall(r'subject\.user\s*==\s*"([^"]+)"', rf.content)
-                        for u in us: action.external_users[u] = rf.filename
+            action.matching_rules = rule_targets.get(aid, [])
+            action.external_groups = rule_externals.get(aid, {}).get("groups", {})
+            action.external_users = rule_externals.get(aid, {}).get("users", {})
             action.update_precedence()
 
     def _load_managed_settings(self):

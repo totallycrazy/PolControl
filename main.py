@@ -18,11 +18,29 @@ HELPER_PATH = "/usr/local/bin/polkit-editor-helper"
 POLICY_PATH = "/usr/share/polkit-1/actions/org.example.polkit-editor.policy"
 
 STYLE_DATA = b"""
+@define-color accent #4a90d9;
+@define-color surface #1e1e24;
+@define-color surface-alt #242431;
+@define-color text #e6e6f0;
+
+window, dialog, box, paned, notebook, scrolledwindow {
+    background: @surface;
+    color: @text;
+}
+
+headerbar {
+    background: linear-gradient(to right, shade(@accent, 1.35), @accent);
+    color: white;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+}
+
 .dirty-action { background-color: #ff8c00; color: white; }
-.namespace-btn { font-size: 0.95em; padding: 4px 8px; }
-.count-badge { color: #4a90d9; font-size: 0.85em; font-weight: bold; margin-left: 6px; }
+.namespace-btn { font-size: 0.95em; padding: 4px 8px; background: @surface-alt; color: @text; border-radius: 6px; }
+.namespace-btn:hover { background: shade(@surface-alt, 1.2); }
+.count-badge { color: @accent; font-size: 0.85em; font-weight: bold; margin-left: 6px; }
 .audit-active { background-color: #e01b24; color: white; }
 .status-warn { color: #ff8c00; font-weight: bold; }
+.treeview { background: @surface-alt; }
 """
 
 class AuditMonitor:
@@ -190,9 +208,10 @@ class PolkitEditorApp(Gtk.Window):
         super().__init__(title="Polkit Manager Pro")
         self.set_default_size(1400, 900)
         self.set_resizable(True)
-        self.maximize() 
+        self.maximize()
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
         self.system = PolkitSystem(); self.is_elevated = False; self.user = getpass.getuser()
-        self.filter_state = "all" 
+        self.filter_state = "all"
         self.audit_monitor = AuditMonitor(self.on_audit_event)
         
         provider = Gtk.CssProvider()
@@ -201,7 +220,7 @@ class PolkitEditorApp(Gtk.Window):
             Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         except Exception as e:
             print(f"[DEBUG] CSS Load Failed: {e}")
-        
+
         self.setup_ui()
         print("[DEBUG] UI construction finished. Queuing data load...")
         GLib.idle_add(self.load_data, True) 
@@ -261,7 +280,7 @@ class PolkitEditorApp(Gtk.Window):
         filter_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         filter_box.set_margin_start(10); filter_box.set_margin_end(10); filter_box.set_margin_top(5); filter_box.set_margin_bottom(5)
         
-        self.search = Gtk.SearchEntry(placeholder_text="Search actions (e.g. 'network wifi')..."); 
+        self.search = Gtk.SearchEntry(placeholder_text="Search actions, namespaces or descriptions...")
         self.search.connect("search-changed", lambda x: self.filter_model.refilter())
         filter_box.pack_start(self.search, True, True, 0)
         
@@ -296,6 +315,7 @@ class PolkitEditorApp(Gtk.Window):
         self.filter_model = self.store.filter_new(); self.filter_model.set_visible_func(self.filter_func)
         self.sort_model = Gtk.TreeModelSort(model=self.filter_model)
         self.tree = Gtk.TreeView(model=self.sort_model)
+        self.tree.get_style_context().add_class("treeview")
         self.tree.connect("row-activated", self.on_row_activated); self.tree.connect("button-press-event", self.on_tree_right_click)
         self.tree.set_tooltip_column(7)
         ren_pix = Gtk.CellRendererPixbuf(); col_status = Gtk.TreeViewColumn("S", ren_pix)
@@ -379,7 +399,8 @@ class PolkitEditorApp(Gtk.Window):
             aid = model.get_value(iter, 0); action = self.system.actions.get(aid)
             if not action: return False
             query = self.search.get_text().lower().strip()
-            if query and not all(term in (aid + " " + action.description).lower() for term in query.split()): return False
+            haystack = (aid + " " + action.description + " " + " ".join(action.allowed_groups) + " " + " ".join(action.allowed_users)).lower()
+            if query and not all(term in haystack for term in query.split()): return False
             if self.filter_state == "managed": return action.is_managed()
             if self.filter_state == "overridden": return action.is_overridden()
             return True
@@ -412,9 +433,12 @@ class PolkitEditorApp(Gtk.Window):
             self.store.append([aid, prec, a.description, privs, custom or "-", ext or "-", a.is_overridden(), tt, status_icon])
         
         for c in self.ns_box.get_children(): self.ns_box.remove(c)
-        self.ns_box.add(self.create_ns_button("All", sum(ns_counts.values())))
+        total = sum(ns_counts.values())
+        self.ns_box.add(self.create_ns_button("All", total))
         for ns, count in sorted(ns_counts.items(), key=lambda item: item[1], reverse=True): self.ns_box.add(self.create_ns_button(ns, count))
-        self.ns_box.show_all(); self.update_ui_state(); self.queue_draw()
+        self.ns_box.show_all(); self.update_ui_state();
+        self.status.push(0, f"Loaded {total} actions • Managed: {len([a for a in self.system.actions.values() if a.is_managed()])}")
+        self.queue_draw()
 
     def update_ui_state(self):
         title = "Polkit Manager Pro" + (" [Elevated]" if self.is_elevated else "") + (" * UNSAVED *" if self.system.is_dirty else "")
@@ -478,6 +502,11 @@ class PolkitEditorApp(Gtk.Window):
     def show_error(self, m):
         d = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.ERROR, buttons=Gtk.ButtonsType.OK, text=m); d.run(); d.destroy()
 
-if __name__ == "__main__":
-    app = PolkitEditorApp(); app.connect("destroy", Gtk.main_quit)
+def main():
+    app = PolkitEditorApp()
+    app.connect("destroy", Gtk.main_quit)
     Gtk.main()
+
+
+if __name__ == "__main__":
+    main()
