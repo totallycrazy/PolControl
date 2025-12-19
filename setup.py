@@ -19,7 +19,6 @@ setup(
     install_requires=["pygobject"],
     classifiers=[
         "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: MIT License",
         "Environment :: X11 Applications :: GTK",
     ],
     package_data={"": ["org.example.polkit-editor.policy"]},
