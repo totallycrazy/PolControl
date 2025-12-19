@@ -147,20 +147,17 @@ class PolkitSystem:
                 self.rule_files.append(PolkitRuleFile(path))
 
     def _map_rules_to_actions(self):
-        rule_targets = defaultdict(set)
+        rule_targets = defaultdict(list)
         rule_externals = defaultdict(lambda: {"groups": {}, "users": {}})
 
         for rf in self.rule_files:
             content = rf.content or ""
-            matches = ACTION_ID_PATTERN.findall(content)
+            matches = re.findall(r'action\.id\s*==\s*"([^"]+)"', content)
             if not matches:
-                matches = [
-                    aid for aid in self.actions.keys()
-                    if re.search(rf'["\']{re.escape(aid)}["\']', content)
-                ]
+                matches = [aid for aid in self.actions.keys() if aid in content]
 
             for aid in matches:
-                rule_targets[aid].add(rf)
+                rule_targets[aid].append(rf)
                 if "90-custom-ui" in rf.filename:
                     continue
                 for g in re.findall(r'isInGroup\("([^"]+)"\)', content):
@@ -169,7 +166,7 @@ class PolkitSystem:
                     rule_externals[aid]["users"][u] = rf.filename
 
         for aid, action in self.actions.items():
-            action.matching_rules = list(rule_targets.get(aid, []))
+            action.matching_rules = rule_targets.get(aid, [])
             action.external_groups = rule_externals.get(aid, {}).get("groups", {})
             action.external_users = rule_externals.get(aid, {}).get("users", {})
             action.update_precedence()
